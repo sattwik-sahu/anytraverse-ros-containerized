@@ -28,7 +28,7 @@ base_driver:
     # 2026-10-04 calibration (speed curve, stall zone, 10 Hz /odom with 0.1 s delay).
     closed_loop: true
     odom_topic: /odom
-    cmd_vel_topic: /cmd_vel_gated
+    cmd_vel_topic: /hound/cmd_vel
     odom_timeout: 0.3          # s
     kp_v: 0.1
     ki_v: 0.5

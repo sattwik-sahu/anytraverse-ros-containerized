@@ -17,4 +17,4 @@ if ! docker ps --format '{{.Names}}' | grep -qx 'anytraverse-controller'; then
 fi
 
 exec docker exec -it anytraverse-controller bash -c \
-  "source /opt/ros/jazzy/setup.bash && source /ws/install/setup.bash && ros2 run hound_base teleop_wasd"
+  "source /opt/ros/jazzy/setup.bash && source /ws/install/setup.bash && ros2 run hound_base teleop_wasd --ros-args -p topic:=/hound/cmd_vel"

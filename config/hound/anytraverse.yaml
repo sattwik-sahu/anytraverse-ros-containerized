@@ -21,4 +21,4 @@ vel_gating:
     state_topic: state
     cmd_vel_topic:
       in: /cmd_vel
-      out: /cmd_vel_gated
+      out: /hound/cmd_vel

@@ -113,8 +113,8 @@ controller_server:
 
     goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 2.0     # loosened further; matches GridBased `tolerance` below
-      yaw_goal_tolerance: 3.15   # > pi: final heading is never checked (angular error is always <= pi)
+      xy_goal_tolerance: 0.25     # loosened further; matches GridBased `tolerance` below
+      yaw_goal_tolerance: 1.57   # > pi: final heading is never checked (angular error is always <= pi)
       stateful: True
 
     FollowPath:
@@ -336,7 +336,7 @@ velocity_smoother:
     use_sim_time: False
     smoothing_frequency: 20.0
     scale_velocities: false
-    feedback: "CLOSED_LOOP" # odom feedback on (/odom @10 Hz); was OPEN_LOOP
+    feedback: "OPEN_LOOP" # odom feedback on (/odom @10 Hz); was OPEN_LOOP
     # wz limit = vx_max / min_turning_radius = 5.0 / 6.0 (sysid measured 0.83).
     # max_velocity: [5.0, 0.0, 0.83]
     # min_velocity: [-0.17, 0.0, -0.83]   # -0.17 only for the backup recovery behavior's reverse
@@ -414,8 +414,8 @@ global_costmap:
         lidar_camera:
           project_pointcloud: true
           pointcloud_topic: "/lidar/points"
-          segmentation_topic: "/segmentation_mask/image_raw"
-          camera_info_topic: "/segmentation_mask/camera_info"
+          segmentation_topic: "/trav_map"
+          camera_info_topic: "/flir_camera/camera_info"
           confidence_topic: ""
           labels_topic: ""
           camera_optical_frame: ""
@@ -440,7 +440,7 @@ global_costmap:
             classes: ["obstacle"]
             class_ids: [1]
             value_min: 0
-            value_max: 125 #130
+            value_max: 140 #130
             base_cost: 254
             max_cost: 254
             min_points_per_tile: 4
@@ -448,7 +448,7 @@ global_costmap:
           traversable:
             classes: ["traversable"]
             class_ids: [2]
-            value_min: 126 #146
+            value_min: 141 #146
             value_max: 255
             base_cost: 0
             max_cost: 0
@@ -514,8 +514,8 @@ local_costmap:
         lidar_camera:
           project_pointcloud: true
           pointcloud_topic: "/lidar/points"
-          segmentation_topic: "/segmentation_mask/image_raw"
-          camera_info_topic: "/segmentation_mask/camera_info"
+          segmentation_topic: "/trav_map"
+          camera_info_topic: "/flir_camera/camera_info"
           confidence_topic: ""
           labels_topic: ""
           camera_optical_frame: ""
@@ -546,14 +546,14 @@ local_costmap:
             classes: ["obstacle"]
             class_ids: [1]
             value_min: 0
-            value_max: 125
+            value_max: 140
             base_cost: 254
             max_cost: 254
             dominant_priority: false
           traversable:
             classes: ["traversable"]
             class_ids: [2]
-            value_min: 126
+            value_min: 141
             value_max: 255
             base_cost: 0
             max_cost: 0

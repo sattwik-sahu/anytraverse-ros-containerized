@@ -1,0 +1,33 @@
+include:
+  - ./docker-compose.yml
+
+services:
+  rosbag-player:
+    build:
+      context: .
+      dockerfile: docker/rosbag-player/Dockerfile
+    image: anytraverse/rosbag-player:jazzy
+    container_name: anytraverse-rosbag-player
+    network_mode: host
+    environment:
+      RMW_IMPLEMENTATION: rmw_zenoh_cpp
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/127.0.0.1:7447\"]"
+    volumes:
+      - /mnt/seagate_sattwik/rosbags:/bags:ro
+    depends_on:
+      - zenohd
+    restart: "no"
+
+  navigation:
+    volumes:
+      - ${CONFIG_DIR:-config/hound}/nav2_params_bag.yaml:/etc/nav2/nav2_params.yaml:ro
+    command: >
+      ros2 launch nav2_bringup navigation_launch.py
+      params_file:=/etc/nav2/nav2_params.yaml
+      autostart:=True
+      use_sim_time:=True
+
+  foxglove:
+    profiles: []
+    # Override the viz profile so foxglove starts with plain `up` in bag mode.
