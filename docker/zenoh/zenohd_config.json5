@@ -1,0 +1,18 @@
+{
+  // Zenoh router on the Jetson. Listens on all interfaces so the same
+  // router serves the wired switch LAN (Jetson <-> controller <-> Ouster
+  // host stack) and the WiFi side (Jetson <-> base station).
+  // Nodes connect to the address that is reachable on their own network,
+  // so traffic stays on the intended physical link.
+  listen: {
+    endpoints: ["tcp/0.0.0.0:7447"]
+  },
+  scouting: {
+    // Keep LAN discovery working on the switch; the base station reaches
+    // the router via an explicit connect endpoint (see .env.example), so
+    // no multicast needs to cross the WiFi router.
+    multicast: {
+      enabled: true
+    }
+  }
+}

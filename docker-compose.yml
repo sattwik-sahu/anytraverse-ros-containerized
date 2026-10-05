@@ -1,0 +1,119 @@
+services:
+  # Lightweight Zenoh router: single rendezvous for all ROS 2 traffic.
+  # Internal nodes dial it on loopback; the base station dials the Jetson's
+  # WiFi address. Topics forward only where a matching subscriber exists.
+  zenohd:
+    build:
+      context: .
+      dockerfile: docker/zenoh/Dockerfile
+    image: anytraverse/zenohd:jazzy
+    container_name: anytraverse-zenohd
+    network_mode: host
+    restart: unless-stopped
+
+  sensors:
+    build:
+      context: .
+      dockerfile: docker/sensors/Dockerfile
+    image: anytraverse/sensors:jazzy
+    container_name: anytraverse-sensors
+    # host network: Ouster UDP on the switch LAN + shared zenoh/GigE tuning.
+    # USB cameras need the whole bus; udev rules + usbfs sizing live on the
+    # host (see utils/setup_spinnaker_host.sh).
+    network_mode: host
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    environment:
+      RMW_IMPLEMENTATION: rmw_zenoh_cpp
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      # Dial the LOCAL router over loopback.
+      ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/127.0.0.1:7447\"]"
+      GENICAM_GENTL64_PATH: /opt/spinnaker/lib/spinnaker-gentl
+    depends_on:
+      - zenohd
+    # Camera + lidar, no rviz, no LIO. Override per run:
+    #   ros2 launch sensors_bringup camera_lidar.launch.py serial:="'20531756'" viz:=False lio:=false
+    command: >
+      ros2 launch sensors_bringup camera_lidar.launch.py
+      serial:="'${FLIR_SERIAL:-20531756}'"
+      viz:=False
+      lio:=true
+      lio_rviz:=false
+
+  navigation:
+    build:
+      context: .
+      dockerfile: docker/navigation/Dockerfile
+    image: anytraverse/navigation:jazzy
+    container_name: anytraverse-navigation
+    # host network: Nav2 must see TF + sensor topics and reach the controller.
+    network_mode: host
+    volumes:
+      # Robot config dir (default config/hound, override via CONFIG_DIR in .env).
+      # Edit ${CONFIG_DIR}/nav2_params.yaml on the host and restart — no rebuild.
+      - ./${CONFIG_DIR:-config/hound}/nav2_params.yaml:/etc/nav2/nav2_params.yaml:ro
+    environment:
+      RMW_IMPLEMENTATION: rmw_zenoh_cpp
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/127.0.0.1:7447\"]"
+    depends_on:
+      - zenohd
+      - sensors
+    command: >
+      ros2 launch nav2_bringup navigation_launch.py
+      params_file:=/etc/nav2/nav2_params.yaml
+      autostart:=True
+      use_sim_time:=False
+
+  anytraverse:
+    build:
+      context: src/perception/anytraverse_ros
+      dockerfile: Dockerfile
+    image: anytraverse/perception:jazzy
+    container_name: anytraverse-perception
+    # host network: subscribes to /camera topics from the sensors container.
+    network_mode: host
+    volumes:
+      # Robot config dir mounted to /ws/config so that:
+      #   params_file            -> /ws/config/anytraverse.yaml
+      #   hydra_config_file      -> /ws/config/pipelines/*.yaml
+      # (relative path in the yaml resolves against WORKDIR /ws)
+      - ./${CONFIG_DIR:-config/hound}/anytraverse.yaml:/ws/config/anytraverse.yaml:ro
+      - ./${CONFIG_DIR:-config/hound}/pipelines:/ws/config/pipelines:ro
+      # Persistent HuggingFace model cache. Download once in the lab
+      # (OFFLINE=0), then field runs reuse it. Without this,
+      # `down`/rebuild wipes the cache and forces a multi-GB re-download.
+      - ./data/hf-cache:/root/.cache/huggingface
+    environment:
+      RMW_IMPLEMENTATION: rmw_zenoh_cpp
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/127.0.0.1:7447\"]"
+      # Offline guard for field runs (no WiFi): one knob drives both libs.
+      # OFFLINE=1 (default) = cache-only, fail loudly if a model is
+      #   missing instead of hanging on network.
+      # OFFLINE=0 = allow downloads (lab seeding run on internet).
+      TRANSFORMERS_OFFLINE: ${OFFLINE:-1}
+      HF_HUB_OFFLINE: ${OFFLINE:-1}
+    depends_on:
+      - zenohd
+      - sensors
+    # init_prompt has no default in the launch file — set INIT_PROMPT in .env.
+    # Syntax: "<prompt1>: <weight1>; <prompt2>: <weight2>[;] ..."
+    command: >
+      ros2 launch anytraverse_ros anytraverse.launch.py
+      params_file:=/ws/config/anytraverse.yaml
+      init_prompt:="${INIT_PROMPT:-}"
+
+  # Robot controller (template — fill in your controller image/launch).
+  # Runs on the robot controller host, dials the Jetson's SWITCH-LAN address
+  # (or kookaburra.local once Avahi publishes the wired IP) so control
+  # traffic stays on the wired switch.
+  # controller:
+  #   image: <your-controller-image>
+  #   container_name: anytraverse-controller
+  #   network_mode: host
+  #   environment:
+  #     RMW_IMPLEMENTATION: rmw_zenoh_cpp
+  #     ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+  #     ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/${JETSON_SWITCH_IP:-192.168.10.1}:7447\"]"
+  #   command: ros2 launch <your_controller_pkg> <your_controller_launch.py>

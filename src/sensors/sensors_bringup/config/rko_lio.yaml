@@ -1,0 +1,32 @@
+# RKO-LIO config for the Ouster lidar on this robot.
+# Extrinsics come from TF: base_link -> lidar_frame -> {os_lidar, os_imu}
+base_frame: base_link
+imu_topic: /lidar/imu
+# Not /lidar/points: lidar_guard drops the Ouster's startup clouds with repeated or
+# backwards stamps, which make RKO-LIO divide by a zero scan interval and abort.
+lidar_topic: /lidar/points_lio
+# Ouster's per-point "t" is ns relative to the cloud stamp; don't let RKO-LIO guess (a
+# broken startup cloud can fool its heuristic).
+lidar_timestamps.multiplier_to_seconds: 1.0e-9
+lidar_timestamps.force_relative: true
+
+odom_topic: /odom
+odom_frame: odom
+invert_odom_tf: false
+reset_on_registration_error: true  # recover instead of crashing if a scan fails to register
+publish_local_map: true
+map_topic: /rko_lio/local_map
+publish_deskewed_scan: true
+
+# lio config
+deskew: true
+voxel_size: 1.0          # try 0.5 indoors / in tight spaces
+max_range: 100.0
+min_range: 1.0
+max_correspondence_distance: 0.5
+convergence_criterion: 0.00001
+max_num_threads: 4
+initialization_phase: true   # robot must be stationary for the first ~2 scans
+double_downsample: true
+max_expected_jerk: 3.0
+min_beta: 200.0
