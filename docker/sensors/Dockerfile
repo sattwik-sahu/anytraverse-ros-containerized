@@ -89,9 +89,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-tf2-ros \
     ros-jazzy-tf2-eigen \
     ros-jazzy-pcl-conversions \
+    ros-jazzy-rko-lio \
     ros-jazzy-cv-bridge \
     ros-jazzy-image-proc \
     ros-jazzy-image-geometry \
+    ros-jazzy-compressed-image-transport \
     ros-jazzy-camera-calibration-parsers \
     ros-jazzy-tf2-geometry-msgs \
     ros-jazzy-ament-cmake-auto \
@@ -103,9 +105,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Build the sensor stack. This pulls in flir_camera_msgs,
 # spinnaker_camera_driver (+synchronized), ouster_sensor_msgs, ouster_ros,
 # image_proc (from src/sensors/image_pipeline) and sensors_bringup.
+# camera_calibration is built too so the container can calibrate the FLIR
+# (see config/hound/calibration/README.md).
 RUN . /opt/ros/jazzy/setup.sh && \
     colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-      --packages-up-to sensors_bringup
+      --packages-up-to sensors_bringup camera_calibration
 
 COPY docker/sensors/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

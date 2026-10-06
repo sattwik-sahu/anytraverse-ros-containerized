@@ -1,3 +1,10 @@
+# AnyTraverse service fragment (upstream repo) is merged in below; the
+# `anytraverse` service here supplies build/image/depends_on/Jetson env,
+# everything else (command, config + hf-cache mounts, GPU, restart)
+# comes from the fragment.
+include:
+  - src/perception/anytraverse_ros/docker/compose.anytraverse.yaml
+
 services:
   # Lightweight Zenoh router: single rendezvous for all ROS 2 traffic.
   # Internal nodes dial it on loopback; the base station dials the Jetson's
@@ -23,6 +30,13 @@ services:
     network_mode: host
     devices:
       - /dev/bus/usb:/dev/bus/usb
+    volumes:
+      # Camera calibration. The driver (via camera_info_manager) loads its
+      # calibration from file:///root/.ros/camera_info/<node name>.yaml —
+      # node name is flir_camera, so the template file lands as flir_camera.yaml.
+      # (If you ever rename the camera node, rename the target side too.)
+      # See config/hound/calibration/README.md for how to (re)generate it.
+      - ${CONFIG_DIR:-config/hound}/calibration/camera_params.yaml:/root/.ros/camera_info/flir_camera.yaml:ro
     environment:
       RMW_IMPLEMENTATION: rmw_zenoh_cpp
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
@@ -51,7 +65,7 @@ services:
     volumes:
       # Robot config dir (default config/hound, override via CONFIG_DIR in .env).
       # Edit ${CONFIG_DIR}/nav2_params.yaml on the host and restart — no rebuild.
-      - ./${CONFIG_DIR:-config/hound}/nav2_params.yaml:/etc/nav2/nav2_params.yaml:ro
+      - ${CONFIG_DIR:-config/hound}/nav2_params.yaml:/etc/nav2/nav2_params.yaml:ro
     environment:
       RMW_IMPLEMENTATION: rmw_zenoh_cpp
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
@@ -68,41 +82,28 @@ services:
   anytraverse:
     build:
       context: src/perception/anytraverse_ros
-      dockerfile: Dockerfile
+      dockerfile: docker/Dockerfile
+      args:
+        ROS_DISTRO: jazzy
     image: anytraverse/perception:jazzy
-    container_name: anytraverse-perception
+    container_name: anytraverse
     # host network: subscribes to /camera topics from the sensors container.
     network_mode: host
-    volumes:
-      # Robot config dir mounted to /ws/config so that:
-      #   params_file            -> /ws/config/anytraverse.yaml
-      #   hydra_config_file      -> /ws/config/pipelines/*.yaml
-      # (relative path in the yaml resolves against WORKDIR /ws)
-      - ./${CONFIG_DIR:-config/hound}/anytraverse.yaml:/ws/config/anytraverse.yaml:ro
-      - ./${CONFIG_DIR:-config/hound}/pipelines:/ws/config/pipelines:ro
-      # Persistent HuggingFace model cache. Download once in the lab
-      # (OFFLINE=0), then field runs reuse it. Without this,
-      # `down`/rebuild wipes the cache and forces a multi-GB re-download.
-      - ./data/hf-cache:/root/.cache/huggingface
     environment:
       RMW_IMPLEMENTATION: rmw_zenoh_cpp
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
       ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/127.0.0.1:7447\"]"
-      # Offline guard for field runs (no WiFi): one knob drives both libs.
-      # OFFLINE=1 (default) = cache-only, fail loudly if a model is
-      #   missing instead of hanging on network.
-      # OFFLINE=0 = allow downloads (lab seeding run on internet).
+      # OFFLINE knob (from .env): 1 = cache-only field mode (default),
+      # 0 = allow downloads (lab seeding run). Maps onto both HF libs.
       TRANSFORMERS_OFFLINE: ${OFFLINE:-1}
       HF_HUB_OFFLINE: ${OFFLINE:-1}
     depends_on:
       - zenohd
       - sensors
-    # init_prompt has no default in the launch file — set INIT_PROMPT in .env.
-    # Syntax: "<prompt1>: <weight1>; <prompt2>: <weight2>[;] ..."
-    command: >
-      ros2 launch anytraverse_ros anytraverse.launch.py
-      params_file:=/ws/config/anytraverse.yaml
-      init_prompt:="${INIT_PROMPT:-}"
+    # command, config dir + hf-cache mounts, GPU reservations, ipc:host and
+    # restart policy are inherited from the included fragment
+    # (src/perception/anytraverse_ros/docker/compose.anytraverse.yaml).
+    # INIT_PROMPT is required by that launch — set it in .env.
 
   # Robot controller (template — fill in your controller image/launch).
   # Runs on the robot controller host, dials the Jetson's SWITCH-LAN address

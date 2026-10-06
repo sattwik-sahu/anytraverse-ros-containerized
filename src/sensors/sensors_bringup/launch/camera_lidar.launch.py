@@ -26,8 +26,8 @@ def generate_launch_description():
         executable="rectify_node",
         name="image_rect",
         remappings=[
-            ("image", "/camera/rgb/image_raw"),
-            ("camera_info", "/camera/rgb/camera_info"),
+            ("image", "/flir_camera/image_raw"),
+            ("camera_info", "/flir_camera/camera_info"),
             ("image_rect", "/camera/rgb/image_rect",)
         ]
     )
