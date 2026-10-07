@@ -368,8 +368,8 @@ global_costmap:
         lidar_camera:
           project_pointcloud: true
           pointcloud_topic: "/lidar/points"
-          segmentation_topic: "/segmentation_mask/image_raw"
-          camera_info_topic: "/segmentation_mask/camera_info"
+          segmentation_topic: "/trav_map"
+          camera_info_topic: "/flir_camera/camera_info"
           confidence_topic: ""
           labels_topic: ""
           camera_optical_frame: ""
@@ -464,8 +464,8 @@ local_costmap:
         lidar_camera:
           project_pointcloud: true
           pointcloud_topic: "/lidar/points"
-          segmentation_topic: "/segmentation_mask/image_raw"
-          camera_info_topic: "/segmentation_mask/camera_info"
+          segmentation_topic: "/trav_map"
+          camera_info_topic: "/flir_camera/camera_info"
           confidence_topic: ""
           labels_topic: ""
           camera_optical_frame: ""
