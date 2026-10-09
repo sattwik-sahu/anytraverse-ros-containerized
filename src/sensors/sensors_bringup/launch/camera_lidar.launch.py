@@ -28,7 +28,8 @@ def generate_launch_description():
         remappings=[
             ("image", "/flir_camera/image_raw"),
             ("camera_info", "/flir_camera/camera_info"),
-            ("image_rect", "/camera/rgb/image_rect",)
+            ("image_rect", "/flir_camera/image_rect"),
+            ("image_rect/compressed", "/flir_camera/image_rect/compressed",)
         ]
     )
 

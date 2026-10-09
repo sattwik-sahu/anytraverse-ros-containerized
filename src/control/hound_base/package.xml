@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>hound_base</name>
+  <version>0.0.1</version>
+  <description>Hound differential-drive base: /cmd_vel to Sabertooth motor controllers.</description>
+  <maintainer email="karthik23@iiserb.ac.in">karthiknambiar29</maintainer>
+  <license>TODO</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
+  <!-- optional at runtime: the BT handbrake input on /vehicle_control_roads -->
+  <!-- <exec_depend>roads_msgs</exec_depend> -->
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

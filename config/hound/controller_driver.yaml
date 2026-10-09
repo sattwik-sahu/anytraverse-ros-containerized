@@ -1,0 +1,40 @@
+base_driver:
+  ros__parameters:
+    port_a: /dev/ttyACM0       # Sabertooth A: motor 1 = left, motor 2 = right
+    port_b: /dev/ttyACM1       # Sabertooth B: motor 1 = right, motor 2 = left
+    baudrate: 9600
+    address_a: 128
+    address_b: 129
+    # Measured with calibrate_base on 2026-10-04 (~/hound_calibration_20261004_104039.csv).
+    # Was 0.6 / 2.0 (placeholders). Re-run calibrate_base after changing surface or tyres.
+    track_width: 4.661         # effective (skid-steer) track width, m
+    max_wheel_speed: 0.913     # wheel speed at max_command, m/s
+    # Ackermann: |angular.z| <= |linear.x| / min_turning_radius on Nav2's /cmd_vel -- never
+    # turns in place. Must equal nav2_params.yaml FollowPath.min_turning_radius and
+    # GridBased.minimum_turning_radius. false = differential drive (turns in place).
+    # (/cmd_vel_teleop is never limited.)
+    ackermann: true
+    min_turning_radius: 1.0
+    max_command: 2000          # Sabertooth units (protocol max 2047), as in the teleop script
+    ramp_rate: 3000.0          # units/s; teleop script: 100 per frame at 30 Hz
+    cmd_timeout: 0.5           # s without /cmd_vel -> stop
+    handbrake_hold: 0.3        # s the BT handbrake overrides /cmd_vel after its last message
+    rate: 30.0                 # Hz
+    invert_left: false
+    invert_right: false
+    # Closed-loop velocity: PI correction on forward speed (v) and yaw rate (w), RKO-LIO's
+    # /odom as feedback, on top of the open-loop conversion above. Falls back to open loop
+    # if /odom is older than odom_timeout. Gains tuned in simulation against the
+    # 2026-10-04 calibration (speed curve, stall zone, 10 Hz /odom with 0.1 s delay).
+    closed_loop: true
+    odom_topic: /odom
+    cmd_vel_topic: /cmd_vel
+    odom_timeout: 0.3          # s
+    kp_v: 0.1
+    ki_v: 0.5
+    kp_w: 0.2
+    ki_w: 0.6
+    max_correction_v: 0.6      # m/s added to / taken from the request, at most
+    max_correction_w: 1.5      # rad/s
+    integral_limit_v: 1.0
+    integral_limit_w: 2.0

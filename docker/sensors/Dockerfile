@@ -74,9 +74,6 @@ RUN echo "libspinnaker libspinnaker/accepted-flir-eula boolean true" | debconf-s
 # For a debug image add:
 #   dpkg -i spinview-qt_*.deb spinview-qt-dev_*.deb
 
-WORKDIR /ws
-COPY src/sensors/ ./src/sensors/
-
 # Explicitly install the known ROS deps first so the image does not depend
 # on rosdep resolving every third-party package (e.g. rko_lio is an
 # exec_depend of sensors_bringup but is not in this repo).
@@ -101,6 +98,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && (rosdep update || true) \
     && (rosdep install --from-paths src --ignore-src -r -y --rosdistro jazzy || true)
+
+WORKDIR /ws
+COPY src/sensors/ ./src/sensors/
 
 # Build the sensor stack. This pulls in flir_camera_msgs,
 # spinnaker_camera_driver (+synchronized), ouster_sensor_msgs, ouster_ros,

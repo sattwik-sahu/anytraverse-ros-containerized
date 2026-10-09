@@ -4,6 +4,19 @@
 # comes from the fragment.
 include:
   - src/perception/anytraverse_ros/docker/compose.anytraverse.yaml
+  - src/control/hound_base/docker/docker-compose.yaml
+
+# Shared anchors: every service runs on the host network and dials the LOCAL
+# zenoh router over loopback. Extend (never duplicate) via alias / merge key.
+x-common:
+  network_mode: &net-host host
+  ros_env: &ros-env
+    RMW_IMPLEMENTATION: rmw_zenoh_cpp
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+    # Dial the LOCAL router over loopback.
+    ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/127.0.0.1:7447\"]"
+  depends_zenohd: &depends-zenohd
+    - zenohd
 
 services:
   # Lightweight Zenoh router: single rendezvous for all ROS 2 traffic.
@@ -15,7 +28,7 @@ services:
       dockerfile: docker/zenoh/Dockerfile
     image: anytraverse/zenohd:jazzy
     container_name: anytraverse-zenohd
-    network_mode: host
+    network_mode: *net-host
     restart: unless-stopped
 
   sensors:
@@ -27,7 +40,7 @@ services:
     # host network: Ouster UDP on the switch LAN + shared zenoh/GigE tuning.
     # USB cameras need the whole bus; udev rules + usbfs sizing live on the
     # host (see utils/setup_spinnaker_host.sh).
-    network_mode: host
+    network_mode: *net-host
     devices:
       - /dev/bus/usb:/dev/bus/usb
     volumes:
@@ -38,13 +51,9 @@ services:
       # See config/hound/calibration/README.md for how to (re)generate it.
       - ${CONFIG_DIR:-config/hound}/calibration/camera_params.yaml:/root/.ros/camera_info/flir_camera.yaml:ro
     environment:
-      RMW_IMPLEMENTATION: rmw_zenoh_cpp
-      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
-      # Dial the LOCAL router over loopback.
-      ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/127.0.0.1:7447\"]"
+      <<: *ros-env
       GENICAM_GENTL64_PATH: /opt/spinnaker/lib/spinnaker-gentl
-    depends_on:
-      - zenohd
+    depends_on: *depends-zenohd
     # Camera + lidar, no rviz, no LIO. Override per run:
     #   ros2 launch sensors_bringup camera_lidar.launch.py serial:="'20531756'" viz:=False lio:=false
     command: >
@@ -61,18 +70,16 @@ services:
     image: anytraverse/navigation:jazzy
     container_name: anytraverse-navigation
     # host network: Nav2 must see TF + sensor topics and reach the controller.
-    network_mode: host
+    network_mode: *net-host
     volumes:
       # Robot config dir (default config/hound, override via CONFIG_DIR in .env).
       # Edit ${CONFIG_DIR}/nav2_params.yaml on the host and restart — no rebuild.
       - ${CONFIG_DIR:-config/hound}/nav2_params.yaml:/etc/nav2/nav2_params.yaml:ro
-    environment:
-      RMW_IMPLEMENTATION: rmw_zenoh_cpp
-      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
-      ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/127.0.0.1:7447\"]"
+    environment: *ros-env
     depends_on:
       - zenohd
       - sensors
+      - anytraverse
     command: >
       ros2 launch nav2_bringup navigation_launch.py
       params_file:=/etc/nav2/nav2_params.yaml
@@ -88,11 +95,9 @@ services:
     image: anytraverse/perception:jazzy
     container_name: anytraverse
     # host network: subscribes to /camera topics from the sensors container.
-    network_mode: host
+    network_mode: *net-host
     environment:
-      RMW_IMPLEMENTATION: rmw_zenoh_cpp
-      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
-      ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/127.0.0.1:7447\"]"
+      <<: *ros-env
       # OFFLINE knob (from .env): 1 = cache-only field mode (default),
       # 0 = allow downloads (lab seeding run). Maps onto both HF libs.
       TRANSFORMERS_OFFLINE: ${OFFLINE:-1}
@@ -105,16 +110,38 @@ services:
     # (src/perception/anytraverse_ros/docker/compose.anytraverse.yaml).
     # INIT_PROMPT is required by that launch — set it in .env.
 
-  # Robot controller (template — fill in your controller image/launch).
-  # Runs on the robot controller host, dials the Jetson's SWITCH-LAN address
-  # (or kookaburra.local once Avahi publishes the wired IP) so control
-  # traffic stays on the wired switch.
-  # controller:
-  #   image: <your-controller-image>
-  #   container_name: anytraverse-controller
-  #   network_mode: host
-  #   environment:
-  #     RMW_IMPLEMENTATION: rmw_zenoh_cpp
-  #     ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
-  #     ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/${JETSON_SWITCH_IP:-192.168.10.1}:7447\"]"
-  #   command: ros2 launch <your_controller_pkg> <your_controller_launch.py>
+  foxglove:
+    build:
+      context: .
+      dockerfile: docker/foxglove/Dockerfile
+    image: anytraverse/foxglove:jazzy
+    container_name: anytraverse-foxglove
+    # Optional visualizer: excluded from plain `up`, include with
+    # `docker compose --profile viz up foxglove` (or explicit `up foxglove`).
+    profiles:
+      - viz
+    # host network: must see all ROS topics + serve Studio over WiFi.
+    network_mode: *net-host
+    environment: *ros-env
+    depends_on: *depends-zenohd
+    # Foxglove Studio connects to ws://<JETSON_WIFI_IP>:8765 (allow 8765/tcp).
+    # Bridge subscribes upstream lazily: only topics opened in Studio cost
+    # CPU/bandwidth. Prefer /compressed topics over WiFi; keep this OFF
+    # during field runs except for debugging.
+
+  controller:
+    build:
+      context: .
+      dockerfile: src/control/hound_base/docker/Dockerfile
+    image: anytraverse/controller:jazzy
+    # Deliberately no restart policy: on hard kill the Sabertooths HOLD their
+    # last command, so an auto-restarted silent driver is unsafe. Start manually.
+    restart: "no"
+    volumes:
+      # Robot template params (tuned values); package default is the fallback.
+      - ${CONFIG_DIR:-config/hound}/controller_driver.yaml:/etc/hound/controller_driver.yaml:ro
+    depends_on:
+      - zenohd
+    command: >
+      ros2 launch hound_base base.launch.py
+      params_file:=/etc/hound/controller_driver.yaml

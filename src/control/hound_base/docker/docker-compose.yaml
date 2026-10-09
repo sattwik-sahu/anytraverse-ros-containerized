@@ -1,0 +1,28 @@
+# hound_base controller service fragment.
+#
+# Consumed via `include:` from the main compose file, which must supply the
+# `build:` block for the `controller` service, e.g.:
+#
+#   include:
+#     - src/control/hound_base/docker/docker-compose.yaml
+#   services:
+#     controller:
+#       build:
+#         context: .
+#         dockerfile: src/control/hound_base/docker/Dockerfile
+#
+# Runtime defaults live here (hardware contract + base env + default launch
+# with in-package params). Deployment decisions (params override mount,
+# depends_on, restart policy, full command) belong in the main file.
+services:
+  controller:
+    container_name: anytraverse-controller
+    network_mode: host
+    devices:
+      - /dev/ttyACM0:/dev/ttyACM0
+      - /dev/ttyACM1:/dev/ttyACM1
+    environment:
+      RMW_IMPLEMENTATION: rmw_zenoh_cpp
+      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      ZENOH_CONFIG_OVERRIDE: "connect/endpoints=[\"tcp/127.0.0.1:7447\"]"
+    command: ros2 launch hound_base base.launch.py
