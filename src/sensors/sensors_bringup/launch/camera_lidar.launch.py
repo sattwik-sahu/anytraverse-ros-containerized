@@ -9,6 +9,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration as LaunchConfig
 from launch.substitutions import PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.actions import SetParameter
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -98,6 +99,12 @@ def generate_launch_description():
     return LaunchDescription(
         [
             # must come first so every node started below picks it up
+            # Stamp all camera topics (image_raw, camera_info, meta) with the
+            # real TF frame instead of the node-name default: the segmentation
+            # layer projects lidar points into camera_info.header.frame_id,
+            # which must exist in TF (base_link -> rgb_camera_frame is static).
+            # Proven to cross the driver include below; other nodes ignore it.
+            SetParameter(name="frame_id", value="rgb_camera_frame"),
             # SetEnvironmentVariable(
             #     'FASTRTPS_DEFAULT_PROFILES_FILE',
             #     PathJoinSubstitution(

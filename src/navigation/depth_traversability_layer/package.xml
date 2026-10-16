@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>depth_traversability_layer</name>
+  <version>0.1.0</version>
+  <description>
+    Nav2 costmap layer fusing a depth image with a traversability mask.
+    Back-projects registered depth pixels with CameraInfo intrinsics, looks up
+    the mask value per pixel, and writes costs into the Costmap2D — the
+    depth-camera counterpart of semantic_segmentation_layer's LiDAR projection.
+  </description>
+  <maintainer email="karthik23@iiserb.ac.in">karthik</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <build_depend>eigen</build_depend>
+  <depend>message_filters</depend>
+  <depend>nav2_costmap_2d</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>sensor_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_eigen</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

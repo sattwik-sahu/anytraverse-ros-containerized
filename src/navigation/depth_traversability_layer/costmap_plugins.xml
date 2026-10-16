@@ -1,0 +1,9 @@
+<library path="depth_traversability_layer">
+  <class type="depth_traversability_layer::DepthTraversabilityLayer" base_class_type="nav2_costmap_2d::Layer">
+    <description>
+      A costmap layer plugin that fuses a registered depth image with a
+      traversability mask: back-projects depth pixels with CameraInfo
+      intrinsics, resolves each pixel to a cost, and writes into the Costmap2D.
+    </description>
+  </class>
+</library>

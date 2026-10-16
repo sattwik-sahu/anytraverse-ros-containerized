@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     python3-colcon-common-extensions \
     python3-rosdep \
+    libeigen3-dev \
     ros-jazzy-navigation2 \
     ros-jazzy-nav2-bringup \
     ros-jazzy-nav2-costmap-2d \
@@ -16,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-vision-msgs \
     ros-jazzy-message-filters \
     ros-jazzy-pluginlib \
+    ros-jazzy-tf2-eigen \
     ros-jazzy-tf2-geometry-msgs \
     ros-jazzy-tf2-sensor-msgs \
     && rm -rf /var/lib/apt/lists/*
@@ -36,7 +38,7 @@ RUN (rosdep update || true) \
 # Build the custom Nav2 plugins (Nav2 itself comes from apt above).
 RUN . /opt/ros/jazzy/setup.sh && \
     colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
-      --packages-up-to semantic_segmentation_layer
+      --packages-up-to semantic_segmentation_layer depth_traversability_layer hound_controller_plugins
 
 COPY docker/navigation/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

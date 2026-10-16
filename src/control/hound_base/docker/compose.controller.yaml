@@ -4,7 +4,7 @@
 # `build:` block for the `controller` service, e.g.:
 #
 #   include:
-#     - src/control/hound_base/docker/docker-compose.yaml
+#     - src/control/hound_base/docker/compose.controller.yaml
 #   services:
 #     controller:
 #       build:

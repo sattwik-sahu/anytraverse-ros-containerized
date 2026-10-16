@@ -1,0 +1,605 @@
+# Nav2 bringup for the ATV (Ackermann, roads_ros/atv_description).
+#
+# HOUND (real robot, this branch): the hound is skid-steer, but hound_base/base_driver makes
+# it drive like this Ackermann vehicle -- no turning in place, |angular.z| <= |linear.x| /
+# min_turning_radius (1.5 m). Keep it equal to GridBased.minimum_turning_radius below; the
+# RPP lookahead and regulated_linear_scaling_min_radius follow it too. Everything else
+# (footprint, speeds, accel) is still the sim ATV's.
+#
+# Geometry/limits below are taken from the workspace, not invented:
+#   wheelbase            = front_axle(x=1.58) - rear_axle(x=-1.45) = 3.03 m
+#                           (atv_description/urdf/atv_base.xacro joint origins)
+#   max_steering_angle    = 0.486 rad (28 deg) MEASURED in the sim with `ros2 run control vehicle_sysid`
+#                           (2026-09-15); the xacro's 0.6981 rad (40 deg) joint limit is never reached.
+#   min_turning_radius    = measured 5.64-5.84 m at full lock -> 6.0 m used below
+#   accel/decel/yaw limits = same sysid run, in /cmd_vel units per WALL-clock second: the sim runs
+#                           at ~0.5x real time and the ROS stack is on wall time. Re-run sysid if
+#                           the sim frame rate (sensor load) changes a lot.
+#   2026-09-18 re-measurement (vehicle_sysid, after the sim-time fix): top speed 4.65 m/s,
+#                           accel 2.54 / decel -3.36 m/s^2 (decel depends on vehicle_control_sub
+#                           brake_kp), reverse >= -2.78 m/s, min turning radius 5.86 m, yaw rate
+#                           0.79 rad/s, yaw accel 1.00 rad/s^2 at top speed (slower at low speed).
+#                           Steering: real delta ~= 0.485 * s^1.98 rad (control/vehicle_model.py:
+#                           0.486 * s^1.98). Command -> motion delay 0.60 s. Values marked
+#                           "2026-09-18" below use these; the replaced values are commented out.
+#   max_speed             = 5.0 m/s   (zeta_config/config/zeta_nav.yaml controller.max_speed;
+#                                       raised from the original 2.5 m/s at user request -- vp_controller's
+#                                       lookahead speed law scales with this cap directly, no retuning needed)
+#   footprint             = rectangle from axle x-positions +/- wheel radius (0.52 m) longitudinally,
+#                           and the (wider) rear track half-width (1.37 m) + tire width/2 (0.2 m)
+#                           laterally, rounded outward. This is an approximation of the ATV hull;
+#                           replace with an exact polygon if precise clearance checking matters.
+#
+# Command interface: controller_server publishes plain geometry_msgs/Twist on `cmd_vel`
+# (Humble nav2_controller default). roads_ros/control/vehicle_control_sub.py already
+# subscribes to /cmd_vel directly (see cmd_vel_callback) and drives the Unreal-sim vehicle
+# through its throttle/steering PIDs, so no cmd_vel bridge node is needed.
+#
+# Reverse: NOT used for normal driving. GridBased (NavFn) plans forward-only paths and
+# FollowPath (RPP) has allow_reversing: false, so the vehicle never reverses while
+# following a plan. The only place reverse is used is the `backup` recovery behavior
+# below, for when the planner can't find a path / the controller gets stuck -- it backs
+# up a short distance so a replan has a better chance of succeeding, then normal
+# (forward-only) navigation resumes. The sim's throttle itself is forward-only
+# (roads.world.vehicle.set_control docs/impl: 0.0-1.0), so vehicle_control_sub.py drives
+# BackUp's negative linear.x through the `brake` control instead of negative throttle --
+# that's an implementation detail internal to vehicle_control_sub.py, not a limitation
+# Nav2 needs to know about.
+
+# Planner: back on SmacPlannerHybrid -- NavfnPlanner ignored the vehicle's turning-radius
+# constraint entirely, which was letting RPP get handed paths too tight to actually track
+# without clipping obstacles (see the repeated "detected collision ahead" runs this was
+# swapped in to fix). Hybrid-A* respects minimum_turning_radius directly.
+# ponytail: this was moved off Smac before because it was too slow over this map's long
+# horizon (max_planning_time: 3.5s vs expected_planner_frequency: 5.0Hz) -- if planning
+# lags in practice, downsample_costmap/lower max_planning_time before reaching for NavFn again.
+# The old NavfnPlanner config is kept below, commented out, for rollback.
+#
+# TF / frames: this workspace never publishes a `map` frame in the running sensor stack
+# (see roads_ros/sensors/static_map_tf.py, which exists but is NOT included in
+# all_sensors.launch.py). Odometry from pose_pub.py is ground truth from the simulator
+# (no drift), so `odom` is used as Nav2's global_frame directly -- no map_server/AMCL.
+# mission_control's own config already treats `odom` as its goal_frame, confirming this
+# is the established convention here, not a new assumption.
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: False
+    # Only the pose navigator is loaded: the stock through_poses tree requires
+    # the Spin action server (absent on this Ackermann base, deliberately), so
+    # loading it aborts bringup. Waypoint-follower goals stay disabled until
+    # through_poses is re-enabled with a spin-free tree.
+    navigators: ["navigate_to_pose"]
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
+    global_frame: odom
+    robot_base_frame: base_link
+    odom_topic: /odom
+    default_server_timeout: 1000   # ms; 20ms default is too short for clear_costmap under load
+    # NOTE: no plugin_lib_names list: Jazzy auto-registers built-in BT plugins,
+    # and listing them explicitly double-registers node types
+    # ("ID already registered" -> SIGSEGV at configure). Add ONLY non-built-in
+    # plugin libs here, if any are ever needed.
+    # Overridden by the launch file (RewrittenYaml) with copies of Nav2's stock
+    # Overridden by the launch file (RewrittenYaml) with copies of Nav2's stock
+    # trees, Spin removed: this is an Ackermann vehicle (can't rotate in place)
+    # and behavior_server no longer loads the Spin plugin, so the <Spin> action
+    # server doesn't exist. Wait/BackUp cover recovery instead.
+    # NOTE: the keys must exist here (even as empty strings) for RewrittenYaml's
+    # param_rewrites to take effect -- it only overwrites existing leaf keys,
+    # never inserts new ones.
+    # Stock tree: periodic 1 Hz replan, NO recovery behaviors (no Spin/Wait/BackUp
+    # nodes, so behavior_server idles and Ackermann-incompatible Spin is never needed).
+    # 1 Hz replanning picks up costmap changes (dynamic obstacles, cleared ghosts)
+    # on every tick; if a goal gets stuck it ABORTS instead of recovering.
+    default_nav_to_pose_bt_xml: "/opt/ros/jazzy/share/nav2_bt_navigator/behavior_trees/navigate_w_replanning_time.xml"
+    default_nav_through_poses_bt_xml: "/opt/ros/jazzy/share/nav2_bt_navigator/behavior_trees/navigate_through_poses_w_replanning_and_recovery.xml"
+
+controller_server:
+  ros__parameters:
+    controller_frequency: 30.0
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+      time_steps: 56
+      model_dt: 0.05
+      batch_size: 2000
+      vx_std: 0.2
+      vy_std: 0.2
+      wz_std: 0.4
+      vx_max: 0.5
+      vx_min: -0.35
+      vy_max: 0.5
+      wz_max: 1.9
+      ax_max: 3.0
+      ax_min: -3.0
+      ay_min: -3.0
+      ay_max: 3.0
+      az_max: 3.5
+      iteration_count: 1
+      temperature: 0.3
+      gamma: 0.015
+      motion_model: "Ackermann"
+      Ackermann:
+        plugin: "mppi::AckermannMotionModel"
+        min_turning_r: 1.0
+      visualize: false
+      critic_index_to_visualize: 0
+      regenerate_noises: false
+      sgf_order: 2
+      TrajectoryVisualizer:
+        trajectory_step: 5
+        time_step: 3
+      TrajectoryValidator:
+        plugin: "mppi::DefaultOptimalTrajectoryValidator"
+        collision_lookahead_time: 2.0
+        consider_footprint: false
+        critics:
+          - ConstraintCritic
+          - CostCritic
+          - GoalCritic
+          - GoalAngleCritic
+          - PathAlignCritic
+          - PathFollowCritic
+          - PathAngleCritic
+          - PreferForwardCritic
+          - VelocityDeadbandCritic
+      ConstraintCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 4.0
+      GoalCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 1.4
+      GoalAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.0
+        threshold_to_consider: 0.5
+      PreferForwardCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        threshold_to_consider: 0.5
+      # ObstaclesCritic:
+      #   enabled: true
+      #   cost_power: 1
+      #   repulsion_weight: 1.5
+      #   critical_weight: 20.0
+      #   consider_footprint: false
+      #   collision_cost: 10000.0
+      #   collision_margin_distance: 0.1
+      #   near_goal_distance: 0.5
+      CostCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 3.81
+        critical_cost: 300.0
+        consider_footprint: true
+        collision_cost: 1000000.0
+        near_goal_distance: 1.0
+        trajectory_point_step: 2
+      PathAlignCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 14.0
+        max_path_occupancy_ratio: 0.05
+        trajectory_point_step: 4
+        threshold_to_consider: 0.5
+        offset_from_furthest: 20
+        use_path_orientations: false
+      PathFollowCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 5.0
+        offset_from_furthest: 5
+        threshold_to_consider: 1.4
+      PathAngleCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 2.0
+        offset_from_furthest: 4
+        threshold_to_consider: 0.5
+        max_angle_to_furthest: 1.0
+        mode: 0
+      VelocityDeadbandCritic:
+        enabled: true
+        cost_power: 1
+        cost_weight: 35.0
+        deadband_velocities: [0.10, 0.00, 0.262]
+      # TwirlingCritic:
+      #   enabled: true
+      #   twirling_cost_power: 1
+      #   twirling_cost_weight: 10.0
+
+planner_server:
+  ros__parameters:
+    use_sim_time: False
+    # Just a warning threshold (max time createPlan() may take before Nav2 logs a
+    # warning) -- it does NOT control replan rate. Actual replanning cadence is the
+    # RateController in behavior_trees/navigate_to_pose_w_replanning_and_recovery.xml
+    # (raised from Nav2's stock 1.0 -> 5.0 Hz there); kept matching it here.
+    expected_planner_frequency: 5.0
+    planner_plugins: ["GridBased"]
+
+    GridBased:
+      plugin: "nav2_smac_planner::SmacPlannerHybrid"
+      downsample_costmap: false           # whether or not to downsample the map
+      downsampling_factor: 1              # multiplier for the resolution of the costmap layer (e.g. 2 on a 5cm costmap would be 10cm)
+      tolerance: 0.25                     # dist-to-goal heuristic cost (distance) for valid tolerance endpoints if exact goal cannot be found.
+      allow_unknown: true                 # allow traveling in unknown space
+      max_iterations: 1000000             # maximum total iterations to search for before failing (in case unreachable), set to -1 to disable
+      max_on_approach_iterations: 1000    # Maximum number of iterations after within tolerances to continue to try to find exact solution
+      max_planning_time: 5.0              # max time in s for planner to plan, smooth
+      motion_model_for_search: "DUBIN"    # Hybrid-A* Dubin, Redds-Shepp
+      angle_quantization_bins: 72         # Number of angle bins for search
+      analytic_expansion_ratio: 3.5       # The ratio to attempt analytic expansions during search for final approach.
+      analytic_expansion_max_length: 3.0  # For Hybrid/Lattice nodes: The maximum length of the analytic expansion to be considered valid to prevent unsafe shortcutting
+      analytic_expansion_max_cost: 200.0  # The maximum single cost for any part of an analytic expansion to contain and be valid, except when necessary on approach to goal
+      analytic_expansion_max_cost_override: false  #  Whether or not to override the maximum cost setting if within critical distance to goal (ie probably required)
+      minimum_turning_radius: 1.0        # minimum turning radius in m of path / vehicle
+      reverse_penalty: 2.0                # Penalty to apply if motion is reversing, must be => 1
+      change_penalty: 0.0                 # Penalty to apply if motion is changing directions (L to R), must be >= 0
+      non_straight_penalty: 1.2           # Penalty to apply if motion is non-straight, must be => 1
+      cost_penalty: 2.0                   # Penalty to apply to higher cost areas when adding into the obstacle map dynamic programming distance expansion heuristic. This drives the robot more towards the center of passages. A value between 1.3 - 3.5 is reasonable.
+      retrospective_penalty: 0.015
+      lookup_table_size: 20.0             # Size of the dubin/reeds-sheep distance window to cache, in meters.
+      cache_obstacle_heuristic: false     # Cache the obstacle map dynamic programming distance expansion heuristic between subsequent replannings of the same goal location. Dramatically speeds up replanning performance (40x) if costmap is largely static.
+      debug_visualizations: false         # For Hybrid nodes: Whether to publish expansions on the /expansions topic as an array of poses (the orientation has no meaning) and the path's footprints on the /planned_footprints topic. WARNING: heavy to compute and to display, for debug only as it degrades the performance.
+      use_quadratic_cost_penalty: False
+      downsample_obstacle_heuristic: True
+      allow_primitive_interpolation: False
+      coarse_search_resolution: 4         # Number of bins to skip when doing a coarse search for the path. Only used for all_direction goal heading mode.
+      goal_heading_mode: "DEFAULT"        # DEFAULT, BIDIRECTIONAL, ALL_DIRECTION
+      smooth_path: True                   # If true, does a simple and quick smoothing post-processing to the path
+
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.3
+        w_data: 0.2
+        tolerance: 1.0e-10
+        do_refinement: true
+        refinement_num: 2
+
+behavior_server:
+  ros__parameters:
+    use_sim_time: False
+    global_frame: odom
+    robot_base_frame: base_link
+    costmap_topic: local_costmap/costmap_raw
+    footprint_topic: local_costmap/published_footprint
+    behavior_plugins: ["backup"]
+    # 0.0 disables BackUp's costmap collision check (DriveOnHeading::isCollisionFree
+    # loops cycle_frequency * simulate_ahead_time times, starting AT the current pose).
+    # With the default 2.0, a vehicle whose footprint is already on lethal cells can
+    # never back out ("Collision Ahead - Exiting DriveOnHeading").
+    # ponytail: blind reverse, nothing stops it for an obstacle behind; restore 2.0
+    # once segmentation stops marking the ground under the vehicle lethal.
+    simulate_ahead_time: 0.0
+    backup:
+      plugin: "nav2_behaviors::BackUp"
+
+waypoint_follower:
+  ros__parameters:
+    use_sim_time: False
+    # Nav2's own stock defaults (nav2_bringup), not tuned for this vehicle.
+    loop_rate: 20
+    stop_on_failure: false
+    waypoint_task_executor_plugin: "wait_at_waypoint"
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: false
+      waypoint_pause_duration: 200
+
+# collision_monitor: DO NOT DELETE THIS BLOCK. The node is launched by
+# navigation_launch.py and aborts ALL of bringup if these keys are missing
+# (untyped empty lists crash identically). It is intentionally inert: a
+# disabled source plus a far-away zone, so it configures clean and never
+# triggers. To make it a real guard, wire observation_sources to /lidar/points.
+collision_monitor:
+  ros__parameters:
+    enabled: false
+    observation_sources: ["idle_scan"]
+    idle_scan:
+      type: "pointcloud"
+      topic: "/idle"
+      enabled: False
+    polygons: ["idle_poly"]
+    idle_poly:
+      type: "polygon"
+      action_type: "stop"
+      points: "[[100.0, 100.0], [100.0, 100.0], [100.0, 100.0], [100.0, 100.0]]"
+      min_points: 1
+
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: False
+    smoothing_frequency: 20.0
+    scale_velocities: false
+    feedback: "CLOSED_LOOP" # odom feedback on (/odom @10 Hz); was OPEN_LOOP
+    # wz limit = vx_max / min_turning_radius = 5.0 / 6.0 (sysid measured 0.83).
+    # max_velocity: [5.0, 0.0, 0.83]
+    # min_velocity: [-0.17, 0.0, -0.83]   # -0.17 only for the backup recovery behavior's reverse
+    # 2026-09-18: vx capped at the measured 4.65 m/s top speed, wz at the measured 0.79 rad/s.
+    # vx min = BT <BackUp backup_speed="0.5"> (backup recovery only, now routed through
+    # this smoother); measured reverse limit is -2.78.
+    max_velocity: [4.65, 0.0, 0.79]
+    min_velocity: [-0.5, 0.0, -0.79]
+    # Measured with vehicle_sysid, wall-clock time base (see header):
+    #   accel: 10-90% rate 2.1-2.8 m/s^2 for 3-5 m/s steps (0.4 for 1 m/s, throttle-P limited)
+    #   decel: brake_kp 2.0 gives -1.7 m/s^2 from 1 m/s up to -5.1 from 5 m/s; -1.6 is
+    #          reachable at every speed, so stops end where the smoother expects
+    #   yaw:   steering slew ~0.11-0.23 1/(m s) * 5 m/s ~= 0.55 rad/s^2
+    # max_accel: [2.0, 0.0, 0.55]
+    # max_decel: [-1.6, 0.0, -0.55]
+    # 2026-09-18: measured. decel -3.36 holds only for the current vehicle_control_sub brake_kp;
+    # yaw accel 1.00 is at top speed (lower speeds turn in slower).
+    max_accel: [3.0, 0.0, 3.00]
+    # Stops must beat the BT handbrake hold (5 s): the smoother is open-loop, so its
+    # ramp-down keeps sending forward /cmd_vel (which releases the handbrake) until done.
+    max_decel: [-5.0, 0.0, -3.00]
+    # Ignore/zero out commands below these magnitudes instead of sending tiny
+    # jitter to the sim (matches controller_server's min_x/theta_velocity_threshold).
+    deadband_velocity: [0.05, 0.0, 0.01]
+    velocity_timeout: 1.0
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      use_sim_time: False
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_link
+      rolling_window: false
+      width: 250
+      height: 250
+      resolution: 0.1
+      origin_x: -125.0
+      origin_y: -125.0
+      # hound: 1.1 m long x 0.8 m wide, centred on base_link (was the sim ATV's 4.1 x 3.2 m).
+      footprint: "[[0.55, 0.4], [0.55, -0.4], [-0.55, -0.4], [-0.55, 0.4]]"
+      # Extra clearance for SmacPlannerHybrid: its search collision-checks this padded
+      # footprint (the smoother relies on inflation instead). Global costmap only, so
+      # controller/BackUp (local costmap) still use the true footprint.
+      # ponytail: 1.0 m margin on all sides, lower it if narrow roads stop being plannable.
+      # footprint_padding: 2.0
+      # False: unexplored cells default straight to free space instead of NO_INFORMATION,
+      # so they're fully traversable, not just planner-allowed-but-tolled. (Previously true,
+      # which -- combined with SmacPlannerHybrid's cost_penalty tolling any non-free cell,
+      # unknown included -- made most of this mostly-unexplored 250x250m map look expensive.)
+      track_unknown_space: false
+      transform_tolerance: 0.3
+      always_send_full_costmap: true
+
+      plugins: ["segmentation_layer", "inflation_layer"]
+
+      # Based on semantic_segmentation_layer/config/segmentation_layer_local_costmap.yaml
+      # (that package's own launch file is a standalone test bringup; this is the "fold it
+      # into your stack" step its README/comments call for). Do not duplicate its standalone
+      # node -- keep it running for standalone testing/visualization, but Nav2's costmaps
+      # load the same plugin class directly.
+      #
+      # tile_map_decay_time is intentionally NOT copied verbatim from that file: it's tuned
+      # there for a *local* rolling costmap (fast expiry so stale nearby marks don't linger).
+      # This is the persistent GLOBAL costmap -- a short decay here means any cell outside
+      # the sensor's current instantaneous view reverts to free/unknown a few seconds after
+      # being observed, which looks like "the costmap keeps resetting". Use a decay long
+      # enough to cover a full run instead.
+      segmentation_layer:
+        plugin: "semantic_segmentation_layer::SemanticSegmentationLayer"
+        enabled: true
+        combination_method: 1
+        observation_sources: lidar_camera
+        lidar_camera:
+          project_pointcloud: true
+          pointcloud_topic: "/lidar/points"
+          segmentation_topic: "/segmentation_mask/image_raw"
+          camera_info_topic: "/segmentation_mask/camera_info"
+          confidence_topic: ""
+          labels_topic: ""
+          camera_optical_frame: ""
+          approximate_sync: true
+          approximate_sync_tolerance: 0.05
+          min_obstacle_distance: 0.3
+          max_obstacle_distance: 20.0
+          observation_persistence: 0.0
+          expected_update_rate: 20.0
+          tile_map_decay_time: 3.0   # persist observations for the whole run (was 3.0)
+          visualize_tile_map: false
+          # direct_cost: true
+          # direct_cost_scale: 254.0
+          # direct_cost_offset: 0.0
+          # direct_cost_ignore_min: -1
+          # direct_cost_ignore_max: -1
+
+          direct_cost: false
+          use_cost_selection: true
+          class_types: ["obstacle", "traversable"] #, "unknown"]
+          obstacle:
+            classes: ["obstacle"]
+            class_ids: [1]
+            value_min: 0
+            value_max: 125 #130
+            base_cost: 254
+            max_cost: 254
+            min_points_per_tile: 4
+            dominant_priority: false
+          traversable:
+            classes: ["traversable"]
+            class_ids: [2]
+            value_min: 126 #146
+            value_max: 255
+            base_cost: 0
+            max_cost: 0
+            min_points_per_tile: 1
+            dominant_priority: true
+          # zeta_seg publishes 163 for pixels it isn't confident about
+          # (segmentation_node.UNKNOWN_MASK_VALUE, in the band left free between the two
+          # ranges above). Treated as traversable: cost 0, and no dominant_priority, so a
+          # later obstacle/traversable observation of the same tile still wins.
+          # unknown:
+          #   classes: ["unknown"]
+          #   class_ids: [3]
+          #   value_min: 157
+          #   value_max: 169
+          #   base_cost: 0
+          #   max_cost: 0
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        enabled: true
+        # hound (1.1 x 0.8 m footprint): inscribed radius 0.4 m, circumscribed 0.68 m -- the
+        # ATV numbers below scale to: >= 0.4 to keep smoothed paths off obstacles, >= 0.68
+        # for the cost gradient and Smac's fast collision checks.
+        # Must be >= the footprint's inscribed radius (half-width 1.6 m). Smac's search
+        # checks the full footprint, but its path smoother (smooth_path) only checks the
+        # path CENTER against cost > 252 (smoother.cpp). Inflation marks cells within the
+        # inscribed radius 253, so with 1.0 here the smoother could pull the centerline to
+        # 1.0 m from an obstacle and the 3.2 m-wide swath overlapped it by up to 0.6 m.
+        # 2.7 >= circumscribed radius (sqrt(2.1^2 + 1.6^2) = 2.64) also gives a cost gradient
+        # past the 1.6 m hard zone and enables Smac's fast collision checks.
+        # ponytail: 1.6 m zone clears the sides; rectangle corners (up to 2.64 m) can still clip
+        # on tight smoothed curves -- set smooth_path: false if that shows up.
+        inflation_radius: 0.2   # hound: >= circumscribed radius 0.68 m (was 0.2)
+        cost_scaling_factor: 3.0
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      use_sim_time: False
+      update_frequency: 5.0
+      publish_frequency: 5.0
+      global_frame: odom
+      robot_base_frame: base_link
+      rolling_window: true
+      width: 50        # >> RPP max_lookahead_dist (7m) + turning radius + margin
+      height: 50
+      resolution: 0.1   # matches the segmentation layer's tuning
+      origin_x: -25.0
+      origin_y: -25.0
+      # hound: 1.1 m long x 0.8 m wide, centred on base_link (was the sim ATV's 4.1 x 3.2 m).
+      footprint: "[[0.55, 0.4], [0.55, -0.4], [-0.55, -0.4], [-0.55, 0.4]]"
+      track_unknown_space: false
+      transform_tolerance: 0.3
+      always_send_full_costmap: true
+
+      plugins: ["segmentation_layer", "inflation_layer"]
+
+      segmentation_layer:
+        plugin: "semantic_segmentation_layer::SemanticSegmentationLayer"
+        enabled: true
+        combination_method: 1
+        observation_sources: lidar_camera
+        lidar_camera:
+          project_pointcloud: true
+          pointcloud_topic: "/lidar/points"
+          segmentation_topic: "/segmentation_mask/image_raw"
+          camera_info_topic: "/segmentation_mask/camera_info"
+          confidence_topic: ""
+          labels_topic: ""
+          camera_optical_frame: ""
+          approximate_sync: true
+          approximate_sync_tolerance: 0.05
+          min_obstacle_distance: 0.3
+          max_obstacle_distance: 20.0
+          observation_persistence: 0.0
+          expected_update_rate: 0.0
+          tile_map_decay_time: 3.0    # fast expiry for the rolling local costmap -- was
+                                       # copy-pasted from global_costmap's 3600.0, which left
+                                       # stale/transient obstacle tiles undead: reset() only
+                                       # clears the Costmap2D grid (SemanticSegmentationLayer::
+                                       # reset(), semantic_segmentation_layer.cpp), not this
+                                       # buffer, so a bad tile got redrawn on every update
+                                       # regardless of clear_entirely_local_costmap recovery.
+          visualize_tile_map: false
+          # direct_cost: true
+          # direct_cost_scale: 254.0
+          # direct_cost_offset: 0.0
+          # direct_cost_ignore_min: -1
+          # direct_cost_ignore_max: -1
+
+          direct_cost: false
+          use_cost_selection: true
+          class_types: ["obstacle","traversable"] #, "unknown"]
+          obstacle:
+            classes: ["obstacle"]
+            class_ids: [1]
+            value_min: 0
+            value_max: 125
+            base_cost: 254
+            max_cost: 254
+            dominant_priority: false
+          traversable:
+            classes: ["traversable"]
+            class_ids: [2]
+            value_min: 126
+            value_max: 255
+            base_cost: 0
+            max_cost: 0
+            dominant_priority: true
+          # unknown:                       # see global_costmap for why
+          #   classes: ["unknown"]
+          #   class_ids: [3]
+          #   value_min: 157
+          #   value_max: 169
+          #   base_cost: 0
+          #   max_cost: 0
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        enabled: true
+        inflation_radius: 0.2   # hound: >= inscribed radius 0.4 m (was 0.2)
+        cost_scaling_factor: 3.0
+
+# (lifecycle_manager_navigation block removed: Jazzy navigation_launch.py
+# hardcodes its managed node list, so params-file entries are never read and
+# the old 6-node subset misled.)
+
+# Default settings, we never really dock the robot
+docking_server:
+  ros__parameters:
+    controller_frequency: 50.0
+    initial_perception_timeout: 5.0
+    wait_charge_timeout: 5.0
+    dock_approach_timeout: 30.0
+    undock_linear_tolerance: 0.05
+    undock_angular_tolerance: 0.1
+    max_retries: 3
+    base_frame: "base_link"
+    fixed_frame: "odom"
+    dock_backwards: false
+    dock_prestaging_tolerance: 0.5
+
+    # Types of docks
+    dock_plugins: ["simple_charging_dock"]
+    simple_charging_dock:
+      plugin: "opennav_docking::SimpleChargingDock"
+      docking_threshold: 0.05
+      staging_x_offset: -0.7
+      use_external_detection_pose: true
+      use_battery_status: false # true
+      use_stall_detection: false # true
+
+      external_detection_timeout: 1.0
+      external_detection_translation_x: -0.18
+      external_detection_translation_y: 0.0
+      external_detection_rotation_roll: -1.57
+      external_detection_rotation_pitch: -1.57
+      external_detection_rotation_yaw: 0.0
+      filter_coef: 0.1
+
+    # Dock instances
+    # The following example illustrates configuring dock instances.
+    # docks: ['home_dock']  # Input your docks here
+    # home_dock:
+    #   type: 'simple_charging_dock'
+    #   frame: map
+    #   pose: [0.0, 0.0, 0.0]
+
+    controller:
+      k_phi: 3.0
+      k_delta: 2.0
+      v_linear_min: 0.15
+      v_linear_max: 0.15

@@ -1,0 +1,7 @@
+<class_libraries>
+  <library path="hound_controller_plugins">
+    <class type="hound_controller_plugins::PidLookaheadController" base_class_type="nav2_core::Controller">
+      <description>PID on the heading error to a look-ahead point on the Nav2 path, Ackermann-limited.</description>
+    </class>
+  </library>
+</class_libraries>

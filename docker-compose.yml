@@ -4,7 +4,7 @@
 # comes from the fragment.
 include:
   - src/perception/anytraverse_ros/docker/compose.anytraverse.yaml
-  - src/control/hound_base/docker/docker-compose.yaml
+  - src/control/hound_base/docker/compose.controller.yaml
 
 # Shared anchors: every service runs on the host network and dials the LOCAL
 # zenoh router over loopback. Extend (never duplicate) via alias / merge key.
@@ -109,6 +109,8 @@ services:
     # restart policy are inherited from the included fragment
     # (src/perception/anytraverse_ros/docker/compose.anytraverse.yaml).
     # INIT_PROMPT is required by that launch — set it in .env.
+    # The launch ns:= argument renders from ANYTRAVERSE_NAMESPACE in .env
+    # (empty = flat single-robot names); container_name stays pinned.
 
   foxglove:
     build:

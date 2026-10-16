@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-rosdep \
     ros-jazzy-foxglove-bridge \
     ros-jazzy-rmw-zenoh-cpp \
+    ros-jazzy-nav2-msgs \
+    ros-jazzy-map-msgs \
     && rm -rf /var/lib/apt/lists/*
 ENV RMW_IMPLEMENTATION=rmw_zenoh_cpp
 ENV ROS_DOMAIN_ID=0
