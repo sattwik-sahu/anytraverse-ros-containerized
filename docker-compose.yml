@@ -10,6 +10,7 @@ include:
 # zenoh router over loopback. Extend (never duplicate) via alias / merge key.
 x-common:
   network_mode: &net-host host
+  ipc: &ipc-host host
   ros_env: &ros-env
     RMW_IMPLEMENTATION: rmw_zenoh_cpp
     ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
@@ -29,6 +30,7 @@ services:
     image: anytraverse/zenohd:jazzy
     container_name: anytraverse-zenohd
     network_mode: *net-host
+    ipc: *ipc-host
     restart: unless-stopped
 
   sensors:
@@ -41,6 +43,7 @@ services:
     # USB cameras need the whole bus; udev rules + usbfs sizing live on the
     # host (see utils/setup_spinnaker_host.sh).
     network_mode: *net-host
+    ipc: *ipc-host
     devices:
       - /dev/bus/usb:/dev/bus/usb
     volumes:
@@ -71,6 +74,7 @@ services:
     container_name: anytraverse-navigation
     # host network: Nav2 must see TF + sensor topics and reach the controller.
     network_mode: *net-host
+    ipc: *ipc-host
     volumes:
       # Robot config dir (default config/hound, override via CONFIG_DIR in .env).
       # Edit ${CONFIG_DIR}/nav2_params.yaml on the host and restart — no rebuild.
@@ -96,6 +100,7 @@ services:
     container_name: anytraverse
     # host network: subscribes to /camera topics from the sensors container.
     network_mode: *net-host
+    ipc: *ipc-host
     environment:
       <<: *ros-env
       # OFFLINE knob (from .env): 1 = cache-only field mode (default),
@@ -124,6 +129,7 @@ services:
       - viz
     # host network: must see all ROS topics + serve Studio over WiFi.
     network_mode: *net-host
+    ipc: *ipc-host
     environment: *ros-env
     depends_on: *depends-zenohd
     # Foxglove Studio connects to ws://<JETSON_WIFI_IP>:8765 (allow 8765/tcp).

@@ -97,23 +97,42 @@ bt_navigator:
 
 controller_server:
   ros__parameters:
-    controller_frequency: 30.0
+    use_sim_time: False
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.05
+    min_theta_velocity_threshold: 0.01
+    odom_topic: /odom
+    progress_checker_plugin: "progress_checker"
+    goal_checker_plugin: "goal_checker"
+    controller_plugins: ["FollowPath"]
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.5
+      movement_time_allowance: 60.0
+
+    goal_checker:
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 2.0     # loosened further; matches GridBased `tolerance` below
+      yaw_goal_tolerance: 3.15   # > pi: final heading is never checked (angular error is always <= pi)
+      stateful: True
+
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController"
       time_steps: 56
       model_dt: 0.05
       batch_size: 2000
-      vx_std: 0.2
-      vy_std: 0.2
-      wz_std: 0.4
-      vx_max: 0.5
-      vx_min: -0.35
-      vy_max: 0.5
+      vx_std: 0.5
+      vy_std: 0.0
+      wz_std: 0.8
+      vx_max: 1.0
+      vx_min: 0.0
+      vy_max: 0.0
       wz_max: 1.9
       ax_max: 3.0
       ax_min: -3.0
-      ay_min: -3.0
-      ay_max: 3.0
+      ay_min: 0.0
+      ay_max: 0.0
       az_max: 3.5
       iteration_count: 1
       temperature: 0.3
@@ -207,7 +226,7 @@ controller_server:
         enabled: true
         cost_power: 1
         cost_weight: 35.0
-        deadband_velocities: [0.10, 0.00, 0.262]
+        deadband_velocities: [0.10, 0.00, 0.10]
       # TwirlingCritic:
       #   enabled: true
       #   twirling_cost_power: 1
@@ -324,8 +343,8 @@ velocity_smoother:
     # 2026-09-18: vx capped at the measured 4.65 m/s top speed, wz at the measured 0.79 rad/s.
     # vx min = BT <BackUp backup_speed="0.5"> (backup recovery only, now routed through
     # this smoother); measured reverse limit is -2.78.
-    max_velocity: [4.65, 0.0, 0.79]
-    min_velocity: [-0.5, 0.0, -0.79]
+    max_velocity: [1.0, 0.0, 1.57]
+    min_velocity: [-0.5, 0.0, -1.57]
     # Measured with vehicle_sysid, wall-clock time base (see header):
     #   accel: 10-90% rate 2.1-2.8 m/s^2 for 3-5 m/s steps (0.4 for 1 m/s, throttle-P limited)
     #   decel: brake_kp 2.0 gives -1.7 m/s^2 from 1 m/s up to -5.1 from 5 m/s; -1.6 is
@@ -335,10 +354,10 @@ velocity_smoother:
     # max_decel: [-1.6, 0.0, -0.55]
     # 2026-09-18: measured. decel -3.36 holds only for the current vehicle_control_sub brake_kp;
     # yaw accel 1.00 is at top speed (lower speeds turn in slower).
-    max_accel: [3.0, 0.0, 3.00]
+    max_accel: [2.0, 0.0, 3.00]
     # Stops must beat the BT handbrake hold (5 s): the smoother is open-loop, so its
     # ramp-down keeps sending forward /cmd_vel (which releases the handbrake) until done.
-    max_decel: [-5.0, 0.0, -3.00]
+    max_decel: [-2.0, 0.0, -3.00]
     # Ignore/zero out commands below these magnitudes instead of sending tiny
     # jitter to the sim (matches controller_server's min_x/theta_velocity_threshold).
     deadband_velocity: [0.05, 0.0, 0.01]
