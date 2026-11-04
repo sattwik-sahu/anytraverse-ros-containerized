@@ -77,7 +77,7 @@ class TeleopWASD(Node):
     def __init__(self):
         super().__init__('teleop_wasd')
         self.linear = float(self.declare_parameter('linear_speed', 0.3).value)
-        self.angular = float(self.declare_parameter('angular_speed', 0.3).value)
+        self.angular = float(self.declare_parameter('angular_speed', 0.8).value)
         self.max_linear = float(self.declare_parameter('max_linear_speed', 3.0).value)
         self.max_angular = float(self.declare_parameter('max_angular_speed', 5.0).value)
         self.first_timeout = float(self.declare_parameter('first_press_timeout', 0.6).value)

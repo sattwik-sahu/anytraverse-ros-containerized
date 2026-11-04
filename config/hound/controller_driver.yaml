@@ -32,8 +32,8 @@ base_driver:
     odom_timeout: 0.3          # s
     kp_v: 0.1
     ki_v: 0.5
-    kp_w: 0.2
-    ki_w: 0.6
+    kp_w: 0.1
+    ki_w: 0.4
     max_correction_v: 0.6      # m/s added to / taken from the request, at most
     max_correction_w: 1.5      # rad/s
     integral_limit_v: 1.0
