@@ -33,38 +33,38 @@ services:
     ipc: *ipc-host
     restart: unless-stopped
 
-  sensors:
-    build:
-      context: .
-      dockerfile: docker/sensors/Dockerfile
-    image: anytraverse/sensors:jazzy
-    container_name: anytraverse-sensors
-    # host network: Ouster UDP on the switch LAN + shared zenoh/GigE tuning.
-    # USB cameras need the whole bus; udev rules + usbfs sizing live on the
-    # host (see utils/setup_spinnaker_host.sh).
-    network_mode: *net-host
-    ipc: *ipc-host
-    devices:
-      - /dev/bus/usb:/dev/bus/usb
-    volumes:
-      # Camera calibration. The driver (via camera_info_manager) loads its
-      # calibration from file:///root/.ros/camera_info/<node name>.yaml —
-      # node name is flir_camera, so the template file lands as flir_camera.yaml.
-      # (If you ever rename the camera node, rename the target side too.)
-      # See config/hound/calibration/README.md for how to (re)generate it.
-      - ${CONFIG_DIR:-config/hound}/calibration/camera_params.yaml:/root/.ros/camera_info/flir_camera.yaml:ro
-    environment:
-      <<: *ros-env
-      GENICAM_GENTL64_PATH: /opt/spinnaker/lib/spinnaker-gentl
-    depends_on: *depends-zenohd
-    # Camera + lidar, no rviz, no LIO. Override per run:
-    #   ros2 launch sensors_bringup camera_lidar.launch.py serial:="'20531756'" viz:=False lio:=false
-    command: >
-      ros2 launch sensors_bringup camera_lidar.launch.py
-      serial:="'${FLIR_SERIAL:-20531756}'"
-      viz:=False
-      lio:=true
-      lio_rviz:=false
+  # sensors:
+  #   build:
+  #     context: .
+  #     dockerfile: docker/sensors/Dockerfile
+  #   image: anytraverse/sensors:jazzy
+  #   container_name: anytraverse-sensors
+  #   # host network: Ouster UDP on the switch LAN + shared zenoh/GigE tuning.
+  #   # USB cameras need the whole bus; udev rules + usbfs sizing live on the
+  #   # host (see utils/setup_spinnaker_host.sh).
+  #   network_mode: *net-host
+  #   ipc: *ipc-host
+  #   devices:
+  #     - /dev/bus/usb:/dev/bus/usb
+  #   volumes:
+  #     # Camera calibration. The driver (via camera_info_manager) loads its
+  #     # calibration from file:///root/.ros/camera_info/<node name>.yaml —
+  #     # node name is flir_camera, so the template file lands as flir_camera.yaml.
+  #     # (If you ever rename the camera node, rename the target side too.)
+  #     # See config/hound/calibration/README.md for how to (re)generate it.
+  #     - ${CONFIG_DIR:-config/hound}/calibration/camera_params.yaml:/root/.ros/camera_info/flir_camera.yaml:ro
+  #   environment:
+  #     <<: *ros-env
+  #     GENICAM_GENTL64_PATH: /opt/spinnaker/lib/spinnaker-gentl
+  #   depends_on: *depends-zenohd
+  #   # Camera + lidar, no rviz, no LIO. Override per run:
+  #   #   ros2 launch sensors_bringup camera_lidar.launch.py serial:="'20531756'" viz:=False lio:=false
+  #   command: >
+  #     ros2 launch sensors_bringup camera_lidar.launch.py
+  #     serial:="'${FLIR_SERIAL:-20531756}'"
+  #     viz:=False
+  #     lio:=true
+  #     lio_rviz:=false
 
   navigation:
     build:
@@ -137,19 +137,19 @@ services:
     # CPU/bandwidth. Prefer /compressed topics over WiFi; keep this OFF
     # during field runs except for debugging.
 
-  controller:
-    build:
-      context: .
-      dockerfile: src/control/hound_base/docker/Dockerfile
-    image: anytraverse/controller:jazzy
-    # Deliberately no restart policy: on hard kill the Sabertooths HOLD their
-    # last command, so an auto-restarted silent driver is unsafe. Start manually.
-    restart: "no"
-    volumes:
-      # Robot template params (tuned values); package default is the fallback.
-      - ${CONFIG_DIR:-config/hound}/controller_driver.yaml:/etc/hound/controller_driver.yaml:ro
-    depends_on:
-      - zenohd
-    command: >
-      ros2 launch hound_base base.launch.py
-      params_file:=/etc/hound/controller_driver.yaml
+  # controller:
+  #   build:
+  #     context: .
+  #     dockerfile: src/control/hound_base/docker/Dockerfile
+  #   image: anytraverse/controller:jazzy
+  #   # Deliberately no restart policy: on hard kill the Sabertooths HOLD their
+  #   # last command, so an auto-restarted silent driver is unsafe. Start manually.
+  #   restart: "no"
+  #   volumes:
+  #     # Robot template params (tuned values); package default is the fallback.
+  #     - ${CONFIG_DIR:-config/hound}/controller_driver.yaml:/etc/hound/controller_driver.yaml:ro
+  #   depends_on:
+  #     - zenohd
+  #   command: >
+  #     ros2 launch hound_base base.launch.py
+  #     params_file:=/etc/hound/controller_driver.yaml
