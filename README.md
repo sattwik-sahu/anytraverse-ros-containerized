@@ -5,7 +5,7 @@ This project provides a containerized solution to run AnyTraverse experiments us
 ## Installation
 
 > [!NOTE]
-> 
+> Install Docker and Docker compose before continuing with the setup
 
 1. Clone the repo to the your machine
 2. Recursively initialize the submodules
