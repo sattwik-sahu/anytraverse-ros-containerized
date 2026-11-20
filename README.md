@@ -53,5 +53,5 @@ docker compose up
 > ```
 >
 > - After starting the Foxglove bridge, you could connect to your robot's computer and visualize the topics by going to [`app.foxglove.dev`](https://app.foxglove.dev/) and connecting to websocket `<myrobot-ip>:8765`.
-> - It is recommended to use the following layout and updating the topic names and other parameters in the panels, according to your setup.
+> - It is recommended to use [this foxglove layout](https://gist.github.com/sattwik-sahu/dbef1d561722357f4a4b910981b9c503) and updating the topic names and other parameters in the panels, according to your setup.
 
